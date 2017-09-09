@@ -1,0 +1,10 @@
+# Accounts Routes
+
+GET      /accounts/:id                     controllers.AccountsController.balance(id)
+POST     /accounts/:id                     controllers.AccountsController.create(id)
+
+# Transfer Routes
+
+POST     /top-up                           controllers.TransfersController.topUp
+POST     /transfer                         controllers.TransfersController.transfer
+POST     /withdraw                         controllers.TransfersController.withdraw
