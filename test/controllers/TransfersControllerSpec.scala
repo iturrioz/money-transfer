@@ -109,7 +109,7 @@ class TransfersControllerSpec extends PlaySpec with GuiceOneAppPerTest with Inje
         store.getAccount("to_test_account") mustBe Some(Account(20))
       }
 
-      "return BadRequest with the FromAccountNotAvailable error code if none of the accounts exist" in new Fixture {
+      "return BadRequest with the FromAccountNotAvailable error code if none if the accounts exist" in new Fixture {
         private val result = route(app, FakeRequest(POST, controllers.routes.TransfersController.transfer().url)
           .withJsonBody(Json.toJson(TransferDTO("from_test_account", "to_test_account", 200)))).get
 

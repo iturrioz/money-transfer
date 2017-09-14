@@ -2,28 +2,25 @@ package controllers
 
 import javax.inject._
 
-import data.AccountsStore
 import dto._
 import dto.Serialization._
-import exceptions.TransferException
+import exceptions.UnknownLogger
 import model.ErrorCodes
 import play.api.Logger
 import play.api.libs.json._
 import play.api.mvc._
-import services.TransferService
+import services.AccountService
+import services.AccountService.{OperationFailed, OperationResponse, OperationSucceeded}
 
-import scala.util.{Failure, Random, Success, Try}
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
   * The controller for the transfer operations.
   *
   * @param cc The ControllerComponents.
-  * @param store The accounts data store. This is a singleton object and it's shared by other controllers
   */
 @Singleton
-class TransfersController @Inject()(cc: ControllerComponents, store: AccountsStore) extends AbstractController(cc) {
-
-  val service = new TransferService(store)
+class TransfersController @Inject()(cc: ControllerComponents, service: AccountService)(implicit executionContext: ExecutionContext) extends AbstractController(cc) {
 
   /**
     * Route that top-ups an account with the amount provided in the body.
@@ -31,7 +28,7 @@ class TransfersController @Inject()(cc: ControllerComponents, store: AccountsSto
     * @return [[Ok]] if the top-up succeeded, or [[BadRequest]] with the errorCode otherwise.
     *        See [[ErrorCodes]] for more information about these error codes.
     */
-  def topUp(): Action[JsValue] = Action(parse.json) { request =>
+  def topUp(): Action[JsValue] = Action.async(parse.json) { request =>
     withParsedRequest[TopUpDTO](request) { topUp =>
       service.topUp(topUp.account, topUp.amount).toResult
     }
@@ -43,7 +40,7 @@ class TransfersController @Inject()(cc: ControllerComponents, store: AccountsSto
     * @return [[Ok]] if the transfer succeeded, or [[BadRequest]] with the errorCode otherwise.
     *        See [[ErrorCodes]] for more information about these error codes.
     */
-  def transfer(): Action[JsValue] = Action(parse.json) { request =>
+  def transfer(): Action[JsValue] = Action.async(parse.json) { request =>
     withParsedRequest[TransferDTO](request) { transfer =>
       service.transfer(from = transfer.from, to = transfer.to, transfer.amount).toResult
     }
@@ -55,7 +52,7 @@ class TransfersController @Inject()(cc: ControllerComponents, store: AccountsSto
     * @return [[Ok]] if the withdraw succeeded, or [[BadRequest]] with the errorCode otherwise.
     *        See [[ErrorCodes]] for more information about these error codes.
     */
-  def withdraw(): Action[JsValue] = Action(parse.json) { request =>
+  def withdraw(): Action[JsValue] = Action.async(parse.json) { request =>
     withParsedRequest[WithdrawDTO](request) { withdraw =>
       service.withdraw(withdraw.account, withdraw.amount).toResult
     }
@@ -70,7 +67,7 @@ class TransfersController @Inject()(cc: ControllerComponents, store: AccountsSto
     * @tparam T The type of the object to be deserialized.
     * @return The result of the operation if the deserialization succeeded or the parsing error otherwise.
     */
-  private def withParsedRequest[T](request: Request[JsValue])(operation: (T) => Result)(implicit reads: Reads[T]): Result = {
+  private def withParsedRequest[T](request: Request[JsValue])(operation: (T) => Future[Result])(implicit reads: Reads[T]): Future[Result] = {
     Json.fromJson[T](request.body) match {
       case JsSuccess(t, _) =>
         operation(t)
@@ -81,27 +78,24 @@ class TransfersController @Inject()(cc: ControllerComponents, store: AccountsSto
             Logger.debug(s"\t$path")
             pathErrors.foreach(error => Logger.debug(s"\t\t${error.message}"))
         }
-        BadRequest(Json.toJson(ErrorDTO("Couldn't parse the json body", ErrorCodes.ParsingError)))
+        Future.successful(BadRequest(Json.toJson(ErrorDTO("Couldn't parse the json body", ErrorCodes.ParsingError))))
     }
   }
 
   /**
-    * Implicit class that allows converting [[Try]] results into play [[Result]].
-    * @param triedResult The result of the operation.
+    * Implicit class that allows converting [[Future]]s of [[OperationResponse]] into play [[Result]] [[Future]].
+    * @param eventualResult The result of the operation.
     */
-  private implicit class TryToResult(triedResult: Try[Unit]) {
-    def toResult: Result = {
-      triedResult match {
-        case Success(_) =>
+  private implicit class TryToResult(eventualResult: Future[OperationResponse]) {
+    def toResult: Future[Result] = {
+      eventualResult.map{
+        case OperationSucceeded =>
           Ok
-        case Failure(TransferException(message, errorCode)) =>
+        case OperationFailed(message, errorCode) =>
           BadRequest(Json.toJson(ErrorDTO(message, errorCode)))
-        case Failure(_) =>
-          // An unknown error happened. In order to check in the logs we are going to provide a correlation id for this
-          // request. This can be improved adding a correlation id that will be provided in the request (i.e. in the
-          // headers) and then added to every log while processing it.
-          val correlationId = Random.alphanumeric.take(20).mkString
-          Logger.error(s"Unknown error: $correlationId")
+      }.recover{
+        case t =>
+          val correlationId = UnknownLogger.logError(s"Unknown error", t)
           BadRequest(Json.toJson(ErrorDTO(s"Unknown error: $correlationId", ErrorCodes.Unknown)))
       }
     }

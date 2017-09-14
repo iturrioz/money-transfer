@@ -1,7 +1,7 @@
 name := """money-transfer"""
 organization := "net.iturrioz"
 
-version := "0.1-SNAPSHOT"
+version := "0.2-SNAPSHOT"
 
 lazy val root = (project in file(".")).enablePlugins(PlayScala)
   .enablePlugins(PlayScala)

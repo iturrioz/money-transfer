@@ -1,16 +1,18 @@
 package services
 
+import javax.inject.Inject
+
 import data.AccountsStore
 import exceptions.TransferException
-import model.ErrorCodes
+import model.{Account, ErrorCodes}
 
 import scala.util.{Failure, Success, Try}
 
 /**
-  * A service that allows making operations in the accounts available in the data store.
+  * The set of operations for the accounts available in the data store.
   * @param store The accounts data store.
   */
-class TransferService(store: AccountsStore) {
+class AccountOperations @Inject() (store: AccountsStore) {
 
   /**
     * Top-ups an account if this exists in the data store.
@@ -68,6 +70,22 @@ class TransferService(store: AccountsStore) {
           store.updateAccount(from, fromResult)
           store.updateAccount(to, toResult)
         }
+    }
+  }
+
+  /**
+    * Creates an account in the store if it doesn't exist
+    * @param id The identifier for the account to be created.
+    * @return A [[Success]] if the account was created, or a [[Failure]] with the error code otherwise.
+    *         See [[ErrorCodes]] for more information.
+    */
+  def create(id: String): Try[Unit] = {
+    store.getAccount(id) match {
+      case Some(_) =>
+        Failure(TransferException("Account already exists", ErrorCodes.AccountAlreadyAvailable))
+      case None =>
+        store.updateAccount(id, Account(0))
+        Success(())
     }
   }
 }
